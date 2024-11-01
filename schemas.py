@@ -5,3 +5,6 @@ class UserCreate(BaseModel):
     email:str
     password:str
     phone:str
+    
+class TokenData(BaseModel):
+    token: str

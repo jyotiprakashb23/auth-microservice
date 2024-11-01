@@ -12,6 +12,7 @@ def verify_password(plain_password, hashed_password):
 
 def get_user(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
+
 def create_access_token(data: dict, expires_delta: timedelta = None):
     print(data)
     to_encode = data.copy()
