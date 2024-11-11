@@ -14,7 +14,6 @@ def get_user(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
-    print(data)
     to_encode = data.copy()
     # print(type(to_encode))
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))

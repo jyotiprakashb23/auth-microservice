@@ -11,15 +11,15 @@ from database import SessionLocal
 from sqlalchemy.orm import Session
 from models import User
 from auth import create_access_token,create_refresh_token,get_user,authenticate_user
+from models import Token
 
 load_dotenv()
 
 app = FastAPI()
 
 origins = [
-    "http://localhost:3000",  # Example: Frontend app running on localhost:3000
-    "http://localhost:8001",  # Example: Other services that might call this API
-    # Add more origins as needed
+    "http://localhost:3000",  
+    "http://localhost:8001", 
 ]
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -53,15 +53,38 @@ async def register(user:UserCreate,db:Session = Depends(get_db)):
 
     return {"msg": "User registered successfully", "user_id": db_user.id}
 
-@app.post("/user/login" ,tags=["Auth Service"])
-async def login(form_data: OAuth2PasswordRequestForm = Depends(),db:Session = Depends(get_db)):
-    user = authenticate_user(db,form_data.username, form_data.password)
+@app.post("/user/login", tags=["Auth Service"])
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=400, detail="Invalid credentials")
     
-    access_token = create_access_token(data={"sub": user.username})
-    refresh_token = create_refresh_token(data={"sub": user.username})
-    return {"access_token": access_token, "token_type": "bearer","refresh_token": refresh_token, }
+    access_token = create_access_token(data={"sub": user.username, "id": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": user.username, "id": str(user.id)})
+    
+    db_token = db.query(Token).filter(Token.user_id == user.id).first()
+    
+    if db_token:
+        db_token.token = access_token
+        db_token.created_at = datetime.utcnow()
+        db_token.expires_at = datetime.utcnow() + timedelta(minutes=int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 30)))
+    else:
+        db_token = Token(
+            user_id=user.id,
+            token=access_token,
+            created_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + timedelta(minutes=int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', 30)))
+        )
+        db.add(db_token)
+    db.commit()
+    db.refresh(db_token)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "refresh_token": refresh_token,
+        "user_id": str(user.id) 
+    }
 
 @app.get("/user/me",tags=["Auth Service"])
 async def read_users_me(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
@@ -106,7 +129,7 @@ async def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
     return {"access_token": new_access_token, "token_type": "bearer"}
 
 @app.post("/token/verify" ,tags=["Auth Service"])
-async def verify_token(token_data:TokenData):
+async def verify_token(token_data:TokenData, db: Session = Depends(get_db)):
     token = token_data.token
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -119,9 +142,10 @@ async def verify_token(token_data:TokenData):
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    return payload
-
-@app.get("/data/demo")
-def demo_function():
-    print("consoling from demo function")
-    return {"msg":"Message from authservice application"}
+    stored_token = db.query(Token).filter(payload['id']==Token.user_id).first()
+    print(token == stored_token.token)
+    if(token == stored_token.token):
+        response = {"message":"Access granted","access":True}
+    else:
+        response = {"message":"Access denied","access":False}
+    return response
